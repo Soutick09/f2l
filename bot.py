@@ -14,9 +14,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Environment variables
-TELEGRAM_BOT_TOKEN = os.getenv("7778310816:AAHkhL5Q1Kv1qNM4UVKdyKIcUDoB3BXtc_c")
-IMGBB_API_KEY = os.getenv("741ef2b341b26c4341f929c2356e4e88")
-OWNER_ID = int(os.getenv("5827289728"))  # Your Telegram ID as an integer
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # Corrected
+IMGBB_API_KEY = os.getenv("IMGBB_API_KEY")  # Corrected
+OWNER_ID = int(os.getenv("OWNER_ID"))  # Corrected
 
 # Authorized users list
 authorized_users = set()
