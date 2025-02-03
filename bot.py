@@ -3,38 +3,39 @@ import requests
 import asyncio
 import random
 import json
+import sys
 from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+    Update, InlineKeyboardButton, InlineKeyboardMarkup
 )
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, CallbackContext
 )
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
 # Environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 IMGBB_API_KEY = os.getenv("IMGBB_API_KEY")
 OWNER_ID = int(os.getenv("OWNER_ID"))
-LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))  # Log Channel ID
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
 
-# Store user list in a file
+# User data file
 USER_DATA_FILE = "users.json"
 registered_users = set()
 
-# Load user data from file
+# Load user data
 if os.path.exists(USER_DATA_FILE):
     with open(USER_DATA_FILE, "r") as f:
         registered_users = set(json.load(f))
 
-# Save user data to file
+# Save user data
 def save_users():
     with open(USER_DATA_FILE, "w") as f:
         json.dump(list(registered_users), f)
 
-# Start command
+# Start Command
 async def start(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     mention = update.effective_user.mention_html()
@@ -44,14 +45,23 @@ async def start(update: Update, context: CallbackContext):
         save_users()
         await context.bot.send_message(LOG_CHANNEL_ID, f"🆕 New User: {mention} (`{user_id}`)")
 
-    keyboard = [[InlineKeyboardButton("Developer", url="https://t.me/Soutick_09")]]
+    start_text = (
+        "✨ **Welcome to the Image Uploader Bot!**\n\n"
+        "📌 **Features:**\n"
+        "✅ Upload images & get a permanent link\n"
+        "✅ Random emoji reactions for fun 🎭\n"
+        "✅ Fully automated & responsive\n"
+        "✅ No storage limits – Upload as much as you want!\n\n"
+        "🚀 **Just send an image to get started!**"
+    )
+    keyboard = [[InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Soutick_09")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Made With ♥️ By Soutick", reply_markup=reply_markup)
+    await update.message.reply_text(start_text, reply_markup=reply_markup)
 
 # Ban a user
 async def ban(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        return await update.message.reply_text("Only the bot owner can use this command.")
+        return await update.message.reply_text("⚠️ Only the bot owner can use this command.")
 
     if len(context.args) != 1:
         return await update.message.reply_text("Usage: /ban <user_id>")
@@ -64,7 +74,7 @@ async def ban(update: Update, context: CallbackContext):
 # Unban a user
 async def unban(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        return await update.message.reply_text("Only the bot owner can use this command.")
+        return await update.message.reply_text("⚠️ Only the bot owner can use this command.")
 
     if len(context.args) != 1:
         return await update.message.reply_text("Usage: /unban <user_id>")
@@ -74,18 +84,18 @@ async def unban(update: Update, context: CallbackContext):
     save_users()
     await update.message.reply_text(f"✅ User `{user_id}` has been unbanned.")
 
-# Restart the bot
+# Restart bot
 async def restart(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        return await update.message.reply_text("Only the bot owner can use this command.")
+        return await update.message.reply_text("⚠️ Only the bot owner can use this command.")
     
     await update.message.reply_text("🔄 Restarting bot...")
-    os.execv(__file__, ["python"] + sys.argv)
+    os.execl(sys.executable, sys.executable, *sys.argv)
 
 # Stats command
 async def stats(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        return await update.message.reply_text("Only the bot owner can use this command.")
+        return await update.message.reply_text("⚠️ Only the bot owner can use this command.")
     
     total_users = len(registered_users)
     await update.message.reply_text(f"📊 Total Users: {total_users}")
@@ -127,7 +137,7 @@ async def handle_media(update: Update, context: CallbackContext):
 # Broadcast command
 async def broadcast(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        return await update.message.reply_text("Only the bot owner can use this command.")
+        return await update.message.reply_text("⚠️ Only the bot owner can use this command.")
     
     if not context.args:
         return await update.message.reply_text("Usage: /broadcast <message>")
@@ -147,7 +157,7 @@ async def broadcast(update: Update, context: CallbackContext):
         
         if index % 2 == 0:  # Update status every 2 messages
             await status_message.edit_text(f"📢 Broadcasting... {sent_count}/{total_users}")
-            await asyncio.sleep(1)  # Delay for better real-time updates
+            await asyncio.sleep(1)
 
     await status_message.edit_text(f"✅ Broadcast Completed! Sent to {sent_count}/{total_users} users.")
 
