@@ -1,23 +1,20 @@
 # Use official Python image
-FROM python:3.11-slim
+FROM python:3.10
 
-# Set working directory
+# Set the working directory
 WORKDIR /app
 
-# Install necessary system packages
-RUN apt update && apt install -y curl
+# Copy all files to the container
+COPY . .
 
-# Install Docker (required for DeepStack)
-RUN curl -fsSL https://get.docker.com | sh
-
-# Copy bot files to the container
-COPY . /app
-
-# Install Python dependencies
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Start DeepStack in the background
-RUN docker run --rm -d -p 5000:5000 deepquestai/deepstack --nsfw
+# Set environment variables (optional, use .env file instead)
+ENV TELEGRAM_BOT_TOKEN=""
+ENV IMGBB_API_KEY=""
+ENV OWNER_ID=""
+ENV LOG_CHANNEL_ID=""
 
 # Run the bot
 CMD ["python", "bot.py"]
