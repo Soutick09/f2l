@@ -1,140 +1,170 @@
 import os
 import requests
+import asyncio
+import random
 import json
-import sys
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+from telegram import (
+    Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+)
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, filters, CallbackContext
+)
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
+
+# Environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 IMGBB_API_KEY = os.getenv("IMGBB_API_KEY")
-DEEPSTACK_URL = os.getenv("DEEPSTACK_URL")  # Local NSFW API
 OWNER_ID = int(os.getenv("OWNER_ID"))
-LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))  # Log Channel ID
 
-# User Data
-users = set()
-warnings = {}
-banned_users = set()
+# Store user list in a file
+USER_DATA_FILE = "users.json"
+registered_users = set()
 
-# Start Command
+# Load user data from file
+if os.path.exists(USER_DATA_FILE):
+    with open(USER_DATA_FILE, "r") as f:
+        registered_users = set(json.load(f))
+
+# Save user data to file
+def save_users():
+    with open(USER_DATA_FILE, "w") as f:
+        json.dump(list(registered_users), f)
+
+# Start command
 async def start(update: Update, context: CallbackContext):
-    user = update.effective_user
-    users.add(user.id)  # Store user ID
-    await update.message.reply_text("Welcome! Send an image to upload.")
-    await context.bot.send_message(LOG_CHANNEL_ID, f"👤 New user: [{user.full_name}](tg://user?id={user.id})", parse_mode="Markdown")
+    user_id = update.effective_user.id
+    mention = update.effective_user.mention_html()
 
-# Ban System
+    if user_id not in registered_users:
+        registered_users.add(user_id)
+        save_users()
+        await context.bot.send_message(LOG_CHANNEL_ID, f"🆕 New User: {mention} (`{user_id}`)")
+
+    keyboard = [[InlineKeyboardButton("Developer", url="https://t.me/Soutick_09")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Made With ♥️ By Soutick", reply_markup=reply_markup)
+
+# Ban a user
 async def ban(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        return
-    if not context.args:
-        await update.message.reply_text("Usage: /ban <user_id>")
-        return
-    user_id = int(context.args[0])
-    banned_users.add(user_id)
-    await update.message.reply_text(f"🚫 User {user_id} has been banned!")
+        return await update.message.reply_text("Only the bot owner can use this command.")
 
+    if len(context.args) != 1:
+        return await update.message.reply_text("Usage: /ban <user_id>")
+
+    user_id = int(context.args[0])
+    registered_users.discard(user_id)
+    save_users()
+    await update.message.reply_text(f"🚫 User `{user_id}` has been banned.")
+
+# Unban a user
 async def unban(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        return
-    if not context.args:
-        await update.message.reply_text("Usage: /unban <user_id>")
-        return
+        return await update.message.reply_text("Only the bot owner can use this command.")
+
+    if len(context.args) != 1:
+        return await update.message.reply_text("Usage: /unban <user_id>")
+
     user_id = int(context.args[0])
-    banned_users.discard(user_id)
-    await update.message.reply_text(f"✅ User {user_id} has been unbanned!")
+    registered_users.add(user_id)
+    save_users()
+    await update.message.reply_text(f"✅ User `{user_id}` has been unbanned.")
 
-# NSFW Detection (Local AI)
-async def check_nsfw(image_path):
-    files = {"image": open(image_path, "rb")}
-    response = requests.post(DEEPSTACK_URL, files=files).json()
-    return response["nsfw"] > 0.7  # NSFW threshold
+# Restart the bot
+async def restart(update: Update, context: CallbackContext):
+    if update.effective_user.id != OWNER_ID:
+        return await update.message.reply_text("Only the bot owner can use this command.")
+    
+    await update.message.reply_text("🔄 Restarting bot...")
+    os.execv(__file__, ["python"] + sys.argv)
 
-# Handle Media Upload
+# Stats command
+async def stats(update: Update, context: CallbackContext):
+    if update.effective_user.id != OWNER_ID:
+        return await update.message.reply_text("Only the bot owner can use this command.")
+    
+    total_users = len(registered_users)
+    await update.message.reply_text(f"📊 Total Users: {total_users}")
+
+# Handle media upload
 async def handle_media(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
-    if user_id in banned_users:
-        await update.message.reply_text("🚫 You are banned from using this bot.")
-        return
+    mention = update.effective_user.mention_markdown_v2()
 
     file = update.message.photo[-1] if update.message.photo else update.message.document
-    file_info = await context.bot.get_file(file.file_id)
-    image_path = f"{user_id}.jpg"
-    await file_info.download_to_drive(image_path)
+    file_path = await context.bot.get_file(file.file_id)
 
-    # NSFW Check
-    if await check_nsfw(image_path):
-        warnings[user_id] = warnings.get(user_id, 0) + 1
-        os.remove(image_path)  # Delete NSFW image
-        if warnings[user_id] >= 3:
-            banned_users.add(user_id)
-            await update.message.reply_text("🚨 You have been banned for sending NSFW images!")
-        else:
-            await update.message.reply_text(f"⚠️ Warning {warnings[user_id]}/3: NSFW content is not allowed!")
-        return
+    # Upload Progress Message
+    status_message = await update.message.reply_text("📤 Uploading...")
 
     # Upload to ImgBB
-    with open(image_path, "rb") as img:
-        res = requests.post(f"https://api.imgbb.com/1/upload?key={IMGBB_API_KEY}", files={"image": img})
-
-    os.remove(image_path)  # Delete local file
+    with requests.get(file_path.file_path, stream=True) as response:
+        response.raise_for_status()
+        files = {"image": response.content}
+        res = requests.post(f"https://api.imgbb.com/1/upload?key={IMGBB_API_KEY}", files=files)
 
     if res.status_code == 200:
         image_url = res.json()["data"]["image"]["url"]
-        await update.message.reply_text(f"{image_url}")
-
-        # Forward image to log channel
-        await context.bot.send_photo(LOG_CHANNEL_ID, photo=image_url, caption=f"📸 Image from [{update.effective_user.full_name}](tg://user?id={user_id}) (`{user_id}`)", parse_mode="Markdown")
+        await update.message.reply_text(image_url)
     else:
         await update.message.reply_text("❌ Upload failed! Please try again.")
 
-# Broadcast Message
+    # Delete Uploading Message
+    await context.bot.delete_message(chat_id=status_message.chat_id, message_id=status_message.message_id)
+
+    # Forward Image to Log Channel
+    caption_text = f"📸 Image received from [{update.effective_user.first_name}](tg://user?id={user_id}) (`{user_id}`)"
+    await context.bot.send_photo(chat_id=LOG_CHANNEL_ID, photo=file.file_id, caption=caption_text, parse_mode="Markdown")
+
+    # Send Random Reaction
+    reactions = ["🔥", "😎", "👍", "😍", "🤩", "👏", "💯", "😂"]
+    await update.message.reply_text(random.choice(reactions))
+
+# Broadcast command
 async def broadcast(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        return
+        return await update.message.reply_text("Only the bot owner can use this command.")
+    
     if not context.args:
-        await update.message.reply_text("Usage: /broadcast <message>")
-        return
-    message = " ".join(context.args)
+        return await update.message.reply_text("Usage: /broadcast <message>")
+    
+    message_text = " ".join(context.args)
+    total_users = len(registered_users)
     sent_count = 0
-    for user_id in users:
+
+    status_message = await update.message.reply_text(f"📢 Broadcasting... 0/{total_users}")
+
+    for index, user_id in enumerate(registered_users, start=1):
         try:
-            await context.bot.send_message(user_id, message, parse_mode="Markdown")
+            await context.bot.send_message(user_id, text=message_text, parse_mode="Markdown")
             sent_count += 1
-        except:
-            pass  # Ignore errors
-    await update.message.reply_text(f"📢 Broadcast sent to {sent_count} users!")
+        except Exception:
+            pass  # Ignore errors (e.g., user blocked bot)
+        
+        if index % 2 == 0:  # Update status every 2 messages
+            await status_message.edit_text(f"📢 Broadcasting... {sent_count}/{total_users}")
+            await asyncio.sleep(1)  # Delay for better real-time updates
 
-# Bot Stats
-async def stats(update: Update, context: CallbackContext):
-    if update.effective_user.id != OWNER_ID:
-        return
-    await update.message.reply_text(f"📊 Total Users: {len(users)}\n🚫 Banned Users: {len(banned_users)}")
+    await status_message.edit_text(f"✅ Broadcast Completed! Sent to {sent_count}/{total_users} users.")
 
-# Restart Bot
-async def restart(update: Update, context: CallbackContext):
-    if update.effective_user.id != OWNER_ID:
-        return
-    await update.message.reply_text("🔄 Restarting bot...")
-    os.execl(sys.executable, sys.executable, *sys.argv)  # Proper restart
-
-# Main Function
+# Main function
 def main():
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Commands
+    # Command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ban", ban))
     application.add_handler(CommandHandler("unban", unban))
-    application.add_handler(CommandHandler("broadcast", broadcast))
-    application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("restart", restart))
+    application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(CommandHandler("broadcast", broadcast, pass_args=True))
 
-    # Media Handling
-    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_media))
+    # Media handler
+    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
 
     # Start bot
     application.run_polling()
