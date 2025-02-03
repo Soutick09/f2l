@@ -1,6 +1,7 @@
 import os
 import requests
 import hashlib
+import json
 from io import BytesIO
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
@@ -17,15 +18,23 @@ load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 IMGBB_API_KEY = os.getenv("IMGBB_API_KEY")
+MODERATE_CONTENT_API_KEY = os.getenv("MODERATE_CONTENT_API_KEY")  # NSFW detection API
 OWNER_ID = int(os.getenv("OWNER_ID"))
-LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))  # Log channel for tracking activity
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
 
-# Store banned users and uploaded file hashes
-banned_users = set()
+# Database (store users, banned users, and warnings)
+users_db = set()
+banned_users = {}
 uploaded_hashes = set()
 
 
 async def start(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    users_db.add(user_id)  # Store user ID
+    
+    # Log user join
+    await context.bot.send_message(LOG_CHANNEL_ID, text=f"🟢 New user started: [{update.effective_user.first_name}](tg://user?id={user_id}) (`{user_id}`)", parse_mode="Markdown")
+
     keyboard = [[InlineKeyboardButton("Developer", url="https://t.me/Soutick_09")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Made With ♥️ By Soutick", reply_markup=reply_markup)
@@ -39,7 +48,7 @@ async def ban(update: Update, context: CallbackContext):
         return await update.message.reply_text("Usage: /ban <user_id>")
     
     user_id = int(context.args[0])
-    banned_users.add(user_id)
+    banned_users[user_id] = True
     await update.message.reply_text(f"User {user_id} has been banned.")
 
 
@@ -51,7 +60,7 @@ async def unban(update: Update, context: CallbackContext):
         return await update.message.reply_text("Usage: /unban <user_id>")
     
     user_id = int(context.args[0])
-    banned_users.discard(user_id)
+    banned_users.pop(user_id, None)
     await update.message.reply_text(f"User {user_id} has been unbanned.")
 
 
@@ -59,11 +68,11 @@ async def stats(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
         return await update.message.reply_text("Only the bot owner can use this command.")
     
-    total_users = len(context.application.bot_data.get("users", set()))
+    total_users = len(users_db)
     total_uploads = len(uploaded_hashes)
     
     stats_message = f"📊 **Bot Stats**\n\n👥 Users: {total_users}\n📸 Uploaded Images: {total_uploads}"
-    await update.message.reply_text(stats_message)
+    await update.message.reply_text(stats_message, parse_mode="Markdown")
 
 
 async def restart(update: Update, context: CallbackContext):
@@ -74,6 +83,16 @@ async def restart(update: Update, context: CallbackContext):
     os.execv(__file__, ['python'] + os.sys.argv)
 
 
+async def nsfw_check(image_url):
+    """Check if an image contains NSFW content using ModerateContent API."""
+    try:
+        response = requests.get(f"https://api.moderatecontent.com/moderate/?key={MODERATE_CONTENT_API_KEY}&url={image_url}")
+        result = response.json()
+        return result.get("predictions", {}).get("adult", 0) > 0.5  # If NSFW probability > 50%
+    except:
+        return False  # Default to safe if API fails
+
+
 async def handle_media(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     if user_id in banned_users:
@@ -82,10 +101,10 @@ async def handle_media(update: Update, context: CallbackContext):
     file = update.message.photo[-1] if update.message.photo else update.message.document
     file_path = await context.bot.get_file(file.file_id)
 
-    # Log user activity
+    # Log user activity & forward image
     mention = f"[{update.effective_user.first_name}](tg://user?id={user_id})"
-    log_message = f"📸 Image received from {mention} (`{user_id}`)"
-    await context.bot.send_message(LOG_CHANNEL_ID, text=log_message)
+    caption = f"📸 Image received from {mention} (`{user_id}`)"
+    await context.bot.send_photo(LOG_CHANNEL_ID, photo=file_path.file_path, caption=caption, parse_mode="Markdown")
 
     # Download file for NSFW & duplicate detection
     file_data = requests.get(file_path.file_path).content
@@ -96,6 +115,17 @@ async def handle_media(update: Update, context: CallbackContext):
 
     uploaded_hashes.add(file_hash)
 
+    # NSFW Detection
+    if await nsfw_check(file_path.file_path):
+        warnings = banned_users.get(user_id, 0) + 1
+        banned_users[user_id] = warnings
+
+        if warnings >= 3:
+            await update.message.reply_text("❌ You have been banned for sending NSFW images.")
+        else:
+            await update.message.reply_text(f"⚠️ Warning {warnings}/3: NSFW content detected. You will be banned after 3 warnings.")
+        return
+
     # Upload Progress Bar
     status_message = await update.message.reply_text("⏳ Uploading...")
 
@@ -105,7 +135,7 @@ async def handle_media(update: Update, context: CallbackContext):
 
     if res.status_code == 200:
         img_url = res.json()["data"]["image"]["url"]
-        await update.message.reply_text(f"✅ Uploaded: {img_url}")
+        await update.message.reply_text(f"{img_url}")
     else:
         await update.message.reply_text("❌ Upload failed! Please try again.")
 
@@ -121,10 +151,7 @@ async def broadcast(update: Update, context: CallbackContext):
     
     message_text = " ".join(context.args)
 
-    # Retrieve all users from bot_data
-    users = context.application.bot_data.get("users", set())
-
-    for user_id in users:
+    for user_id in users_db:
         try:
             await context.bot.send_message(user_id, text=message_text, parse_mode="Markdown")
         except Exception:
