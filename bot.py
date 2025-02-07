@@ -106,6 +106,8 @@ async def stats(update: Update, context: CallbackContext):
 # Handle media upload
 async def handle_media(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
+    
+    # Check if user is banned
     if is_banned(user_id):
         return await update.message.reply_text("❌ You are banned from using this bot.")
     
@@ -115,11 +117,13 @@ async def handle_media(update: Update, context: CallbackContext):
 
     status_message = await update.message.reply_text("📤 Uploading...")
 
+    # Uploading image to ImgBB
     with requests.get(file_path.file_path, stream=True) as response:
         response.raise_for_status()
         files = {"image": response.content}
         res = requests.post(f"https://api.imgbb.com/1/upload?key={IMGBB_API_KEY}", files=files)
 
+    # Check if upload was successful
     if res.status_code == 200:
         image_url = res.json()["data"]["image"]["url"]
         keyboard = [[InlineKeyboardButton("📋 Copy Link", url=image_url)]]
@@ -128,12 +132,15 @@ async def handle_media(update: Update, context: CallbackContext):
     else:
         await update.message.reply_text("❌ Upload failed! Please try again.")
 
+    # Delete the "Uploading..." message
     await context.bot.delete_message(chat_id=status_message.chat_id, message_id=status_message.message_id)
-caption_text = f"📸 <b>Image received from:</b> {mention} ({user_id})"
-    await context.bot.send_photo(chat_id=LOG_CHANNEL_ID, photo=file.file_id, caption=caption_text, parse_mode="HTML")
-    reactions = ["🔥", "😎", "👍", "😍", "🤩", "👏", "💯", "😂", "😜", "💖"]
-    await update.message.reply_text(random.choice(reactions))
 
+    # Log the received image in the log channel
+    caption_text = f"📸 <b>Image received from:</b> {mention} ({user_id})"
+    await context.bot.send_photo(chat_id=LOG_CHANNEL_ID, photo=file.file_id, caption=caption_text, parse_mode="HTML")
+
+    # Add a random emoji reaction instead of replying with text
+    
 # Broadcast command
 async def broadcast(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
