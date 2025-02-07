@@ -127,7 +127,11 @@ async def handle_media(update: Update, context: CallbackContext):
     if banned_users_collection.find_one({"user_id": user_id}):
         return await update.message.reply_text("❌ You are banned from using this bot.")
 
-    file = update.message.photo[-1] if update.message.photo else update.message.document
+    # Allow only images
+    if not update.message.photo:
+        return await update.message.reply_text("❌ This type of file is not supported. Please upload an image.")
+
+    file = update.message.photo[-1]
     file_path = await context.bot.get_file(file.file_id)
 
     status_message = await update.message.reply_text("📤 Uploading...")
