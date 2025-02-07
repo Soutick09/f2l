@@ -13,8 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the current directory contents into the container
 COPY . .
 
-# Expose port (if you're using a web server, else you can skip this line)
-EXPOSE 80
+# Ensure bot.py has executable permissions
+RUN chmod +x bot.py
 
-# Run the bot
-CMD ["python3", "bot.py"]
+# Define the default command to run the bot
+CMD ["python", "bot.py"]
