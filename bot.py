@@ -112,7 +112,6 @@ async def handle_media(update: Update, context: CallbackContext):
 if is_banned(user_id):
         return await update.message.reply_text("❌ You are banned from using this bot.")
     
-    mention = update.effective_user.mention_html()
     
     
     file = update.message.photo[-1] if update.message.photo else update.message.document
