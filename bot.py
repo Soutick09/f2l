@@ -140,7 +140,9 @@ async def handle_media(update: Update, context: CallbackContext):
     await context.bot.send_photo(chat_id=LOG_CHANNEL_ID, photo=file.file_id, caption=caption_text, parse_mode="HTML")
 
     # Add a random emoji reaction instead of replying with text
-    
+    reactions = ["🔥", "😎", "👍", "😍", "🤩", "👏", "💯", "😂", "😜", "💖"]
+await update.message.react(emoji=random.choice(reactions))
+
 # Broadcast command
 async def broadcast(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
