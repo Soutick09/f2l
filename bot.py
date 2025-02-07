@@ -7,18 +7,22 @@ import datetime
 import pytz
 from pymongo import MongoClient
 from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
+    Update, InlineKeyboardButton, InlineKeyboardMarkup, ReactionTypeEmoji
 )
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, CallbackContext
 )
+from dotenv import load_dotenv
 
-# Bot Details (Added Directly)
-TELEGRAM_BOT_TOKEN = "7674446706:AAHk4_GOmE0H2XlWocBH_Yt-YXBLBF0n_o8"
-IMGBB_API_KEY = "741ef2b341b26c4341f929c2356e4e88"
-OWNER_ID = 5827289728
-LOG_CHANNEL_ID = -1002332346887
-MONGO_URI = "mongodb+srv://jimiva5550:jimiva5550@cluster0.hy7t1.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+# Load environment variables
+load_dotenv()
+
+# Environment variables
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+IMGBB_API_KEY = os.getenv("IMGBB_API_KEY")
+OWNER_ID = int(os.getenv("OWNER_ID"))
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
+MONGO_URI = os.getenv("MONGO_URI")
 
 # MongoDB setup
 client = MongoClient(MONGO_URI)
@@ -28,12 +32,9 @@ users_collection = db["users"]
 # Timezone setup
 IST = pytz.timezone("Asia/Kolkata")
 
-# Check if user is banned
-def is_banned(user_id):
-    return not users_collection.find_one({"user_id": user_id})
-
 # Start Command
 async def start(update: Update, context: CallbackContext):
+    await update.message.react("❤️‍🔥")
     user_id = update.effective_user.id
     mention = update.effective_user.mention_html()
 
@@ -103,62 +104,42 @@ async def stats(update: Update, context: CallbackContext):
     total_users = users_collection.count_documents({})
     await update.message.reply_text(f"📊 <b>Total Users:</b> {total_users}", parse_mode="HTML")
 
-import mimetypes
-
 # Handle media upload
 async def handle_media(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
-    
-    # Check if user is banned
-    if is_banned(user_id):
+    mention = update.effective_user.mention_html()
+
+if is_banned(user_id):
         return await update.message.reply_text("❌ You are banned from using this bot.")
     
     mention = update.effective_user.mention_html()
     
-    # Get the file from photo or document
-    if update.message.photo:
-        file = update.message.photo[-1]
-        file_ext = ".jpg"  # Telegram sends photos as JPG
-    elif update.message.document:
-        file = update.message.document
-        file_ext = file.file_name.split(".")[-1] if "." in file.file_name else "unknown"
-    else:
-        return await update.message.reply_text("❌ Unsupported file type!")
-
+    
+    file = update.message.photo[-1] if update.message.photo else update.message.document
     file_path = await context.bot.get_file(file.file_id)
 
     status_message = await update.message.reply_text("📤 Uploading...")
 
-    # Uploading image to ImgBB
     with requests.get(file_path.file_path, stream=True) as response:
         response.raise_for_status()
-        files = {"image": (file.file_name, response.content, mimetypes.guess_type(file.file_name)[0])}
+        files = {"image": response.content}
         res = requests.post(f"https://api.imgbb.com/1/upload?key={IMGBB_API_KEY}", files=files)
 
-    # Check if upload was successful
-    if res.status_code == 200 and "data" in res.json():
-        image_url = res.json()["data"]["url"]
+    if res.status_code == 200:
+        image_url = res.json()["data"]["image"]["url"]
         keyboard = [[InlineKeyboardButton("📋 Copy Link", url=image_url)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("✅ <b>Upload Successful!</b>", reply_markup=reply_markup, parse_mode="HTML")
     else:
-        return await update.message.reply_text("❌ Upload failed! Please try again.")
+        await update.message.reply_text("❌ Upload failed! Please try again.")
 
-    # Delete the "Uploading..." message
     await context.bot.delete_message(chat_id=status_message.chat_id, message_id=status_message.message_id)
 
-    # Log the received image in the log channel
-    caption_text = f"📸 <b>Image received from:</b> {mention} (`{user_id}`)\n📂 File Type: `{file_ext}`"
+    caption_text = f"📸 <b>Image received from:</b> {mention} (`{user_id}`)"
     await context.bot.send_photo(chat_id=LOG_CHANNEL_ID, photo=file.file_id, caption=caption_text, parse_mode="HTML")
 
-    # Determine reaction based on file type
-    image_reactions = ["🔥", "😎", "👍", "😍", "🤩"]
-    gif_reactions = ["😂", "😜", "🎥", "💖", "👏"]
-    reaction = random.choice(gif_reactions if file_ext.lower() == "gif" else image_reactions)
-    
-    # React with appropriate emoji
-    await update.message.react(reaction)
-
+    reactions = ["🔥", "😎", "👍", "😍", "🤩", "👏", "💯", "😂", "😜", "💖"]
+    await update.message.react(ReactionTypeEmoji(random.choice(reactions)))
 
 # Broadcast command
 async def broadcast(update: Update, context: CallbackContext):
