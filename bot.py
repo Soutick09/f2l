@@ -102,7 +102,6 @@ async def stats(update: Update, context: CallbackContext):
 
     total_users = users_collection.count_documents({})
     await update.message.reply_text(f"📊 <b>Total Users:</b> {total_users}", parse_mode="HTML")
-
 # Handle media upload
 async def handle_media(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
@@ -141,7 +140,8 @@ async def handle_media(update: Update, context: CallbackContext):
 
     # Add a random emoji reaction instead of replying with text
     reactions = ["🔥", "😎", "👍", "😍", "🤩", "👏", "💯", "😂", "😜", "💖"]
-await update.message.react(emoji=random.choice(reactions))
+    await update.message.react(random.choice(reactions))  # <-- Fixed indentation and removed `emoji=`
+
 
 # Broadcast command
 async def broadcast(update: Update, context: CallbackContext):
