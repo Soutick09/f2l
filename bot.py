@@ -102,6 +102,9 @@ async def stats(update: Update, context: CallbackContext):
 
     total_users = users_collection.count_documents({})
     await update.message.reply_text(f"📊 <b>Total Users:</b> {total_users}", parse_mode="HTML")
+
+import mimetypes
+
 # Handle media upload
 async def handle_media(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
@@ -111,7 +114,17 @@ async def handle_media(update: Update, context: CallbackContext):
         return await update.message.reply_text("❌ You are banned from using this bot.")
     
     mention = update.effective_user.mention_html()
-    file = update.message.photo[-1] if update.message.photo else update.message.document
+    
+    # Get the file from photo or document
+    if update.message.photo:
+        file = update.message.photo[-1]
+        file_ext = ".jpg"  # Telegram sends photos as JPG
+    elif update.message.document:
+        file = update.message.document
+        file_ext = file.file_name.split(".")[-1] if "." in file.file_name else "unknown"
+    else:
+        return await update.message.reply_text("❌ Unsupported file type!")
+
     file_path = await context.bot.get_file(file.file_id)
 
     status_message = await update.message.reply_text("📤 Uploading...")
@@ -119,28 +132,32 @@ async def handle_media(update: Update, context: CallbackContext):
     # Uploading image to ImgBB
     with requests.get(file_path.file_path, stream=True) as response:
         response.raise_for_status()
-        files = {"image": response.content}
+        files = {"image": (file.file_name, response.content, mimetypes.guess_type(file.file_name)[0])}
         res = requests.post(f"https://api.imgbb.com/1/upload?key={IMGBB_API_KEY}", files=files)
 
     # Check if upload was successful
-    if res.status_code == 200:
-        image_url = res.json()["data"]["image"]["url"]
+    if res.status_code == 200 and "data" in res.json():
+        image_url = res.json()["data"]["url"]
         keyboard = [[InlineKeyboardButton("📋 Copy Link", url=image_url)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("✅ <b>Upload Successful!</b>", reply_markup=reply_markup, parse_mode="HTML")
     else:
-        await update.message.reply_text("❌ Upload failed! Please try again.")
+        return await update.message.reply_text("❌ Upload failed! Please try again.")
 
     # Delete the "Uploading..." message
     await context.bot.delete_message(chat_id=status_message.chat_id, message_id=status_message.message_id)
 
     # Log the received image in the log channel
-    caption_text = f"📸 <b>Image received from:</b> {mention} ({user_id})"
+    caption_text = f"📸 <b>Image received from:</b> {mention} (`{user_id}`)\n📂 File Type: `{file_ext}`"
     await context.bot.send_photo(chat_id=LOG_CHANNEL_ID, photo=file.file_id, caption=caption_text, parse_mode="HTML")
 
-    # Add a random emoji reaction instead of replying with text
-    reactions = ["🔥", "😎", "👍", "😍", "🤩", "👏", "💯", "😂", "😜", "💖"]
-    await update.message.react(random.choice(reactions))  # <-- Fixed indentation and removed `emoji=`
+    # Determine reaction based on file type
+    image_reactions = ["🔥", "😎", "👍", "😍", "🤩"]
+    gif_reactions = ["😂", "😜", "🎥", "💖", "👏"]
+    reaction = random.choice(gif_reactions if file_ext.lower() == "gif" else image_reactions)
+    
+    # React with appropriate emoji
+    await update.message.react(reaction)
 
 
 # Broadcast command
