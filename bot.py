@@ -125,14 +125,14 @@ async def handle_media(update: Update, context: CallbackContext):
 
     # Restrict banned users from uploading media
     if banned_users_collection.find_one({"user_id": user_id}):
-        return await update.message.reply_text("❌ You are banned from using this bot.")
+        return await update.message.reply_text("❌ You are banned from using this bot. Contact @Soutick_09.")
 
     # Allow only images
     if not update.message.photo:
-        return await update.message.reply_text("❌ This type of file is not supported. Please upload an image.")
+        return await update.message.reply_text("❌ Dump! Please upload only images.")
 
-    file = update.message.photo[-1]
-    file_path = await context.bot.get_file(file.file_id)
+    file_id = update.message.photo.file_id
+    file_path = await context.bot.get_file(file_id)
 
     status_message = await update.message.reply_text("📤 Uploading...")
 
@@ -147,12 +147,12 @@ async def handle_media(update: Update, context: CallbackContext):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("✅ <b>Upload Successful!</b>", reply_markup=reply_markup, parse_mode="HTML")
     else:
-        await update.message.reply_text("❌ Upload failed! Please try again.")
+        await update.message.reply_text("❌ Upload failed! Please inform to @Soutick_09.")
 
     await context.bot.delete_message(chat_id=status_message.chat_id, message_id=status_message.message_id)
 
     caption_text = f"📸 <b>Image received from:</b> {mention} (`{user_id}`)"
-    await context.bot.send_photo(chat_id=LOG_CHANNEL_ID, photo=file.file_id, caption=caption_text, parse_mode="HTML")
+    await context.bot.send_photo(chat_id=LOG_CHANNEL_ID, photo=file_id, caption=caption_text, parse_mode="HTML")
 
 # Broadcast command
 async def broadcast(update: Update, context: CallbackContext):
