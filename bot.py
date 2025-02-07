@@ -29,9 +29,16 @@ MONGO_URI = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI)
 db = client["telegram_bot"]
 users_collection = db["users"]
+banned_users = db["banned_users"]
 
 # Timezone setup
 IST = pytz.timezone("Asia/Kolkata")
+
+
+# Check if a user is banned
+def is_banned(user_id):
+    return banned_users.find_one({"user_id": user_id}) is not None
+
 
 # Start Command
 async def start(update: Update, context: CallbackContext):
@@ -55,6 +62,7 @@ async def start(update: Update, context: CallbackContext):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(start_text, reply_markup=reply_markup, parse_mode="HTML")
 
+
 # Ban a user
 async def ban(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
@@ -64,12 +72,14 @@ async def ban(update: Update, context: CallbackContext):
         return await update.message.reply_text("Usage: /ban <user_id>")
 
     user_id = int(context.args[0])
-    users_collection.delete_one({"user_id": user_id})
+    banned_users.insert_one({"user_id": user_id})
     await update.message.reply_text(f"🚫 User `{user_id}` has been banned.", parse_mode="HTML")
+
     try:
-        await context.bot.send_message(user_id, "❌ You have been banned from using this bot. Contact @Soutick_09 to get unbanned!")
+        await context.bot.send_message(user_id, "❌ You have been banned from using this bot.")
     except:
         pass
+
 
 # Unban a user
 async def unban(update: Update, context: CallbackContext):
@@ -80,12 +90,14 @@ async def unban(update: Update, context: CallbackContext):
         return await update.message.reply_text("Usage: /unban <user_id>")
 
     user_id = int(context.args[0])
-    users_collection.insert_one({"user_id": user_id})
+    banned_users.delete_one({"user_id": user_id})
     await update.message.reply_text(f"✅ User `{user_id}` has been unbanned.", parse_mode="HTML")
+
     try:
         await context.bot.send_message(user_id, "✅ You have been unbanned! You can use the bot again.")
     except:
         pass
+
 
 # Restart bot
 async def restart(update: Update, context: CallbackContext):
@@ -94,8 +106,9 @@ async def restart(update: Update, context: CallbackContext):
 
     await update.message.reply_text("🔄 Restarting bot...")
     now = datetime.datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
-    await context.bot.send_message(LOG_CHANNEL_ID, f"♻️ Bot restarted successfully.\n🕒 Restarted on: <b>{now} IST</b>", parse_mode="HTML")
+    await context.bot.send_message(LOG_CHANNEL_ID, f"♻️ Bot restarted on: <b>{now} IST</b>", parse_mode="HTML")
     os.execl(sys.executable, sys.executable, *sys.argv)
+
 
 # Stats command
 async def stats(update: Update, context: CallbackContext):
@@ -111,31 +124,24 @@ async def handle_media(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     mention = update.effective_user.mention_html()
 
-    # Check if user is banned
     if is_banned(user_id):
         return await update.message.reply_text("❌ You are banned from using this bot.")
-    
-    # Get the file from photo or document
-    if update.message.photo:
-        file = update.message.photo[-1]
-        file_ext = ".jpg"  # Telegram sends photos as JPG
-    elif update.message.document:
-        file = update.message.document
-        file_ext = file.file_name.split(".")[-1] if "." in file.file_name else "unknown"
-    else:
+
+    file = update.message.photo[-1] if update.message.photo else update.message.document
+
+    if not file:
         return await update.message.reply_text("❌ Unsupported file type!")
 
     file_path = await context.bot.get_file(file.file_id)
+    file_ext = mimetypes.guess_extension(file.mime_type) or "unknown"
 
     status_message = await update.message.reply_text("📤 Uploading...")
 
-    # Uploading image to ImgBB
     with requests.get(file_path.file_path, stream=True) as response:
         response.raise_for_status()
-        files = {"image": (file.file_name, response.content, mimetypes.guess_type(file.file_name)[0])}
+        files = {"image": (file.file_name, response.content, file.mime_type)}
         res = requests.post(f"https://api.imgbb.com/1/upload?key={IMGBB_API_KEY}", files=files)
 
-    # Check if upload was successful
     if res.status_code == 200 and "data" in res.json():
         image_url = res.json()["data"]["url"]
         keyboard = [[InlineKeyboardButton("📋 Copy Link", url=image_url)]]
@@ -144,25 +150,20 @@ async def handle_media(update: Update, context: CallbackContext):
     else:
         return await update.message.reply_text("❌ Upload failed! Please try again.")
 
-    # Delete the "Uploading..." message
     await context.bot.delete_message(chat_id=status_message.chat_id, message_id=status_message.message_id)
 
-    # Log the received image in the log channel
-    caption_text = f"📸 <b>Image received from:</b> {mention} (`{user_id}`)\n📂 File Type: `{file_ext}`"
+    caption_text = f"📸 <b>Image from:</b> {mention} (`{user_id}`)\n📂 File Type: `{file_ext}`"
     await context.bot.send_photo(chat_id=LOG_CHANNEL_ID, photo=file.file_id, caption=caption_text, parse_mode="HTML")
 
-    # Add reaction based on file type
-    image_reactions = ["🔥", "😎", "👍", "😍", "🤩"]
-    gif_reactions = ["😂", "😜", "🎥", "💖", "👏"]
-    reaction = random.choice(gif_reactions if file_ext.lower() == "gif" else image_reactions)
+    reactions = ["🔥", "😎", "👍", "😍", "🤩", "👏", "💯"]
+    await update.message.react(random.choice(reactions))
 
-    # React with emoji
-    await update.message.react(reaction)
+
 # Broadcast command
 async def broadcast(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
         return await update.message.reply_text("⚠️ Only the bot owner can use this command.")
-    
+
     if not update.message.reply_to_message:
         return await update.message.reply_text("Reply to a message to broadcast!")
 
@@ -182,24 +183,21 @@ async def broadcast(update: Update, context: CallbackContext):
             await status_message.edit_text(f"📢 Broadcasting... {sent_count}/{total_users}")
             await asyncio.sleep(1)
 
-    await status_message.edit_text(f"✅ Broadcast Completed! Sent to {sent_count}/{total_users} users.")
+    await status_message.edit_text(f"✅ Broadcast Sent to {sent_count}/{total_users} users.")
+
 
 # Main function
 def main():
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    # Command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ban", ban))
     application.add_handler(CommandHandler("unban", unban))
     application.add_handler(CommandHandler("restart", restart))
     application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("broadcast", broadcast))
-
-    # Media handler
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
-
     application.run_polling()
+
 
 if __name__ == "__main__":
     main()
