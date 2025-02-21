@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  telegram_bot:
+    build: .
+    restart: always
+    environment:
+      - API_ID=28450765
+      - API_HASH=36f00f11f9d5c65e69b81fd804453a93
+      - BOT_TOKEN=7674446706:AAHk4_GOmE0H2XlWocBH_Yt-YXBLBF0n_o8
+      - IMGBB_API_KEY=741ef2b341b26c4341f929c2356e4e88
+      - LOG_CHANNEL=-1002332346887
+    container_name: telegram_bot
