@@ -1,198 +1,105 @@
 import os
 import requests
-import asyncio
-import sys
-import datetime
-import pytz
-from pymongo import MongoClient
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
-)
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler, filters, CallbackContext
-)
-from dotenv import load_dotenv
+import logging
+from telethon import TelegramClient, events
 
-# Load environment variables
-load_dotenv()
+# Hardcoded API credentials
+API_ID = 28450765  # Replace with your API ID
+API_HASH = "36f00f11f9d5c65e69b81fd804453a93"  # Replace with your API Hash
+BOT_TOKEN = "7674446706:AAHk4_GOmE0H2XlWocBH_Yt-YXBLBF0n_o8"  # Replace with your bot token
+IMGBB_API_KEY = "741ef2b341b26c4341f929c2356e4e88"  # Replace with your ImgBB API key
+LOG_CHANNEL = -1002332346887  # Replace with your log channel ID
+ADMINS = [5827289728]  # Replace with admin user IDs
 
-# Environment variables
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-IMGBB_API_KEY = os.getenv("IMGBB_API_KEY")
-OWNER_ID = int(os.getenv("OWNER_ID"))
-LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
-MONGO_URI = os.getenv("MONGO_URI")
+# Initialize bot client
+bot = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
-# MongoDB setup
-client = MongoClient(MONGO_URI)
-db = client["telegram_bot"]
-users_collection = db["users"]
-banned_users_collection = db["banned_users"]
+# Logging setup
+logging.basicConfig(level=logging.INFO)
 
-# Timezone setup
-IST = pytz.timezone("Asia/Kolkata")
+# Function to upload image to ImgBB
+def upload_image(file_path):
+    with open(file_path, "rb") as img:
+        response = requests.post(
+            "https://api.imgbb.com/1/upload",
+            params={"key": IMGBB_API_KEY},
+            files={"image": img}
+        )
+    os.remove(file_path)  # Delete local file after upload
+    return response.json().get("data", {}).get("url")
 
-# Start Command
-async def start(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    mention = update.effective_user.mention_html()
+# Function to check if user is an admin
+def is_admin(user_id):
+    return user_id in ADMINS
 
-    # Allow banned users only to use /start
-    if banned_users_collection.find_one({"user_id": user_id}):
-        return await update.message.reply_text("❌ You are banned from using this bot.")
+# Handle /start command
+@bot.on(events.NewMessage(pattern="/start"))
+async def start(event):
+    user = event.sender
+    await event.respond(f"👋 Hello {user.first_name}! Send me an image, and I'll give you a permanent link.")
 
-    if not users_collection.find_one({"user_id": user_id}):
-        users_collection.insert_one({"user_id": user_id})
-        await context.bot.send_message(LOG_CHANNEL_ID, f"🆕 New User: {mention} (`{user_id}`)")
+    # Log user start event
+    log_msg = f"🚀 New User Started Bot\n👤 User: @{user.username} (ID: {user.id})"
+    await bot.send_message(LOG_CHANNEL, log_msg)
 
-    start_text = (
-        "✨ <b>Welcome to the Image Uploader Bot!</b>\n\n"
-        "📌 <b>Features:</b>\n"
-        "✅ Upload images & get a permanent link\n"
-        "✅ Fully automated & responsive\n"
-        "✅ No storage limits – Upload as much as you want!\n\n"
-        "🚀 <b>Just send an image to get started!</b>"
-    )
-    keyboard = [[InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Soutick_09")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(start_text, reply_markup=reply_markup, parse_mode="HTML")
+# Handle image uploads
+@bot.on(events.NewMessage(func=lambda e: e.photo))
+async def handle_image(event):
+    user = event.sender
+    msg = await event.reply("🔄 Uploading image...")
 
-# Ban a user
-async def ban(update: Update, context: CallbackContext):
-    if update.effective_user.id != OWNER_ID:
-        return await update.message.reply_text("⚠️ Only the bot owner can use this command.")
+    # Save the image file
+    photo = await event.download_media()
 
-    if len(context.args) != 1:
-        return await update.message.reply_text("Usage: /ban <user_id>")
-
-    user_id = int(context.args[0])
-    if banned_users_collection.find_one({"user_id": user_id}):
-        return await update.message.reply_text(f"🚫 User `{user_id}` is already banned.", parse_mode="HTML")
-
-    banned_users_collection.insert_one({"user_id": user_id})
-    users_collection.delete_one({"user_id": user_id})
+    # Upload to ImgBB
+    image_url = upload_image(photo)
     
-    await update.message.reply_text(f"🚫 User `{user_id}` has been banned.", parse_mode="HTML")
-    try:
-        await context.bot.send_message(user_id, "❌ You have been banned from using this bot. Contact @Soutick_09 to get unbanned!")
-    except:
-        pass
-
-# Unban a user
-async def unban(update: Update, context: CallbackContext):
-    if update.effective_user.id != OWNER_ID:
-        return await update.message.reply_text("⚠️ Only the bot owner can use this command.")
-
-    if len(context.args) != 1:
-        return await update.message.reply_text("Usage: /unban <user_id>")
-
-    user_id = int(context.args[0])
-    if not banned_users_collection.find_one({"user_id": user_id}):
-        return await update.message.reply_text(f"✅ User `{user_id}` is not banned.", parse_mode="HTML")
-
-    banned_users_collection.delete_one({"user_id": user_id})
-    users_collection.insert_one({"user_id": user_id})
+    # Send the result
+    buttons = [[{"text": "📋 Copy Link", "url": image_url}]]
+    await event.respond(f"✅ Image Uploaded!\n🔗 [Click Here]({image_url})", buttons=buttons)
     
-    await update.message.reply_text(f"✅ User `{user_id}` has been unbanned.", parse_mode="HTML")
-    try:
-        await context.bot.send_message(user_id, "✅ You have been unbanned! You can use the bot again.")
-    except:
-        pass
+    # Delete the uploading message
+    await msg.delete()
 
-# Restart bot
-async def restart(update: Update, context: CallbackContext):
-    if update.effective_user.id != OWNER_ID:
-        return await update.message.reply_text("⚠️ Only the bot owner can use this command.")
+    # Log upload
+    log_msg = f"🖼 New Image Upload\n👤 User: @{user.username} (ID: {user.id})\n📷 Image: {image_url}"
+    await bot.send_message(LOG_CHANNEL, log_msg)
 
-    await update.message.reply_text("🔄 Restarting bot...")
-    now = datetime.datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
-    await context.bot.send_message(LOG_CHANNEL_ID, f"♻️ Bot restarted successfully.\n🕒 Restarted on: <b>{now} IST</b>", parse_mode="HTML")
-    os.execl(sys.executable, sys.executable, *sys.argv)
-
-# Stats command
-async def stats(update: Update, context: CallbackContext):
-    if update.effective_user.id != OWNER_ID:
-        return await update.message.reply_text("⚠️ Only the bot owner can use this command.")
-
-    total_users = users_collection.count_documents({})
-    total_banned = banned_users_collection.count_documents({})
-    await update.message.reply_text(f"📊 <b>Total Users:</b> {total_users}\n🚫 <b>Banned Users:</b> {total_banned}", parse_mode="HTML")
-
-# Handle media upload
-async def handle_media(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    mention = update.effective_user.mention_html()
-
-    # Restrict banned users from uploading media
-    if banned_users_collection.find_one({"user_id": user_id}):
-        return await update.message.reply_text("❌ You are banned from using this bot. Contact @Soutick_09.")
-
-    # Allow only images
-    if not update.message.photo:
-        return await update.message.reply_text("❌ Dump! Please upload only images.")
-
-    file_id = update.message.photo.file_id
-    file_path = await context.bot.get_file(file_id)
-
-    status_message = await update.message.reply_text("📤 Uploading...")
-
-    with requests.get(file_path.file_path, stream=True) as response:
-        response.raise_for_status()
-        files = {"image": response.content}
-        res = requests.post(f"https://api.imgbb.com/1/upload?key={IMGBB_API_KEY}", files=files)
-
-    if res.status_code == 200:
-        image_url = res.json()["data"]["image"]["url"]
-        keyboard = [[InlineKeyboardButton("📋 Copy Link", url=image_url)]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("✅ <b>Upload Successful!</b>", reply_markup=reply_markup, parse_mode="HTML")
+# Admin commands
+@bot.on(events.NewMessage(pattern="/ban (.+)"))
+async def ban_user(event):
+    if is_admin(event.sender_id):
+        user_id = int(event.pattern_match.group(1))
+        ADMINS.append(user_id)  # Add to banned list
+        await event.respond(f"🚫 User {user_id} has been banned.")
     else:
-        await update.message.reply_text("❌ Upload failed! Please inform to @Soutick_09.")
+        await event.respond("❌ You are not an admin!")
 
-    await context.bot.delete_message(chat_id=status_message.chat_id, message_id=status_message.message_id)
+@bot.on(events.NewMessage(pattern="/unban (.+)"))
+async def unban_user(event):
+    if is_admin(event.sender_id):
+        user_id = int(event.pattern_match.group(1))
+        ADMINS.remove(user_id)
+        await event.respond(f"✅ User {user_id} has been unbanned.")
+    else:
+        await event.respond("❌ You are not an admin!")
 
-    caption_text = f"📸 <b>Image received from:</b> {mention} (`{user_id}`)"
-    await context.bot.send_photo(chat_id=LOG_CHANNEL_ID, photo=file_id, caption=caption_text, parse_mode="HTML")
+@bot.on(events.NewMessage(pattern="/stats"))
+async def stats(event):
+    if is_admin(event.sender_id):
+        await event.respond(f"📊 Total users: {len(ADMINS)} (Tracking not fully implemented)")
+    else:
+        await event.respond("❌ You are not an admin!")
 
-# Broadcast command
-async def broadcast(update: Update, context: CallbackContext):
-    if update.effective_user.id != OWNER_ID:
-        return await update.message.reply_text("⚠️ Only the bot owner can use this command.")
-    
-    if not update.message.reply_to_message:
-        return await update.message.reply_text("Reply to a message to broadcast!")
+@bot.on(events.NewMessage(pattern="/broadcast (.+)"))
+async def broadcast(event):
+    if is_admin(event.sender_id):
+        message = event.pattern_match.group(1)
+        await bot.send_message("me", message)  # Replace with actual broadcast logic
+        await event.respond("📢 Broadcast sent!")
+    else:
+        await event.respond("❌ You are not an admin!")
 
-    total_users = users_collection.count_documents({})
-    sent_count = 0
-    status_message = await update.message.reply_text(f"📢 Broadcasting... 0/{total_users}")
-
-    for index, user in enumerate(users_collection.find(), start=1):
-        user_id = user["user_id"]
-        try:
-            await update.message.reply_to_message.copy(user_id)
-            sent_count += 1
-        except:
-            pass
-
-        if index % 2 == 0:
-            await status_message.edit_text(f"📢 Broadcasting... {sent_count}/{total_users}")
-            await asyncio.sleep(1)
-
-    await status_message.edit_text(f"✅ Broadcast Completed! Sent to {sent_count}/{total_users} users.")
-
-# Main function
-def main():
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("ban", ban))
-    application.add_handler(CommandHandler("unban", unban))
-    application.add_handler(CommandHandler("restart", restart))
-    application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(CommandHandler("broadcast", broadcast))
-    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
-
-    application.run_polling()
-
-if __name__ == "__main__":
-    main()
+# Start the bot
+print("🤖 Bot is running...")
+bot.run_until_disconnected()
