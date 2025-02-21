@@ -1,6 +1,9 @@
 import os
+import time
 import requests
+import psutil
 import logging
+from datetime import datetime
 from telethon import TelegramClient, events
 
 # Hardcoded API credentials
@@ -10,12 +13,30 @@ BOT_TOKEN = "7674446706:AAHk4_GOmE0H2XlWocBH_Yt-YXBLBF0n_o8"  # Replace with you
 IMGBB_API_KEY = "741ef2b341b26c4341f929c2356e4e88"  # Replace with your ImgBB API key
 LOG_CHANNEL = -1002332346887  # Replace with your log channel ID
 ADMINS = [5827289728]  # Replace with admin user IDs
+BANNED_USERS = set()  # Store banned users
 
 # Initialize bot client
 bot = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
+
+# Bot start time
+START_TIME = time.time()
+
+# Function to get bot uptime
+def get_uptime():
+    uptime_seconds = int(time.time() - START_TIME)
+    hours, remainder = divmod(uptime_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours}h {minutes}m {seconds}s"
+
+# Function to get VPS stats
+def get_vps_stats():
+    cpu_usage = psutil.cpu_percent(interval=1)
+    ram_usage = psutil.virtual_memory().percent
+    disk_usage = psutil.disk_usage('/').percent
+    return f"💻 CPU: {cpu_usage}%\n🖥 RAM: {ram_usage}%\n📂 Disk: {disk_usage}%"
 
 # Function to upload image to ImgBB
 def upload_image(file_path):
@@ -28,7 +49,7 @@ def upload_image(file_path):
     os.remove(file_path)  # Delete local file after upload
     return response.json().get("data", {}).get("url")
 
-# Function to check if user is an admin
+# Check if user is an admin
 def is_admin(user_id):
     return user_id in ADMINS
 
@@ -46,6 +67,12 @@ async def start(event):
 @bot.on(events.NewMessage(func=lambda e: e.photo))
 async def handle_image(event):
     user = event.sender
+
+    # Check if user is banned
+    if user.id in BANNED_USERS:
+        await event.reply("🚫 You are banned from using this bot.")
+        return
+
     msg = await event.reply("🔄 Uploading image...")
 
     # Save the image file
@@ -53,11 +80,14 @@ async def handle_image(event):
 
     # Upload to ImgBB
     image_url = upload_image(photo)
-    
-    # Send the result
-    buttons = [[{"text": "📋 Copy Link", "url": image_url}]]
-    await event.respond(f"✅ Image Uploaded!\n🔗 [Click Here]({image_url})", buttons=buttons)
-    
+
+    if image_url:
+        # Send the result
+        buttons = [[{"text": "📋 Copy Link", "url": image_url}]]
+        await event.respond(f"✅ Image Uploaded!\n🔗 [Click Here]({image_url})", buttons=buttons)
+    else:
+        await event.respond("❌ Failed to upload image. Please try again.")
+
     # Delete the uploading message
     await msg.delete()
 
@@ -66,20 +96,20 @@ async def handle_image(event):
     await bot.send_message(LOG_CHANNEL, log_msg)
 
 # Admin commands
-@bot.on(events.NewMessage(pattern="/ban (.+)"))
+@bot.on(events.NewMessage(pattern="/ban (\d+)"))
 async def ban_user(event):
     if is_admin(event.sender_id):
         user_id = int(event.pattern_match.group(1))
-        ADMINS.append(user_id)  # Add to banned list
+        BANNED_USERS.add(user_id)
         await event.respond(f"🚫 User {user_id} has been banned.")
     else:
         await event.respond("❌ You are not an admin!")
 
-@bot.on(events.NewMessage(pattern="/unban (.+)"))
+@bot.on(events.NewMessage(pattern="/unban (\d+)"))
 async def unban_user(event):
     if is_admin(event.sender_id):
         user_id = int(event.pattern_match.group(1))
-        ADMINS.remove(user_id)
+        BANNED_USERS.discard(user_id)
         await event.respond(f"✅ User {user_id} has been unbanned.")
     else:
         await event.respond("❌ You are not an admin!")
@@ -87,7 +117,9 @@ async def unban_user(event):
 @bot.on(events.NewMessage(pattern="/stats"))
 async def stats(event):
     if is_admin(event.sender_id):
-        await event.respond(f"📊 Total users: {len(ADMINS)} (Tracking not fully implemented)")
+        uptime = get_uptime()
+        vps_stats = get_vps_stats()
+        await event.respond(f"📊 **Bot Stats**\n⏳ Uptime: {uptime}\n\n{vps_stats}")
     else:
         await event.respond("❌ You are not an admin!")
 
